@@ -92,6 +92,7 @@ import org.apache.solr.common.cloud.ZooKeeperException;
 import org.apache.solr.common.params.CollectionParams;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.CoreAdminParams;
+import org.apache.solr.common.params.MapSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.IOUtils;
@@ -2183,6 +2184,20 @@ public class ZkController implements Closeable {
       throw new SolrException(ErrorCode.SERVER_ERROR, "Unable to rejoin election", e);
     }
 
+  }
+
+  public void rejoinShardLeaderElection(CoreDescriptor coreDescriptor, boolean rejoinAtHead) throws InterruptedException, IOException, KeeperException {
+    CloudDescriptor cloudDescriptor = coreDescriptor.getCloudDescriptor();
+    if (cloudDescriptor == null) {
+      return;
+    }
+    ContextKey contextKey = new ContextKey(coreDescriptor.getCollectionName(), cloudDescriptor.getCoreNodeName());
+    ElectionContext prevContext = electionContexts.get(contextKey);
+    if (prevContext == null) {
+      return;
+    }
+    ShardLeaderElectionContext prevElectionContext = (ShardLeaderElectionContext) prevContext;
+    prevElectionContext.getLeaderElector().retryElection(prevContext, rejoinAtHead);
   }
 
   public void rejoinShardLeaderElection(SolrParams params) {

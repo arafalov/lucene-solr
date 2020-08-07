@@ -41,7 +41,7 @@ import java.util.concurrent.TimeUnit;
 
 class SolrCores {
 
-  private static Object modifyLock = new Object(); // for locking around manipulating any of the core maps.
+  private static final Object modifyLock = new Object(); // for locking around manipulating any of the core maps.
   private final Map<String, SolrCore> cores = new LinkedHashMap<>(); // For "permanent" cores
 
   // These descriptors, once loaded, will _not_ be unloaded, i.e. they are not "transient".
@@ -49,7 +49,7 @@ class SolrCores {
 
   private final CoreContainer container;
   
-  private Set<String> currentlyLoadingCores = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
+  private final Set<String> currentlyLoadingCores = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -63,8 +63,6 @@ class SolrCores {
 
   private TransientSolrCoreCacheFactory transientCoreCache;
 
-  private TransientSolrCoreCache transientSolrCoreCache = null;
-  
   SolrCores(CoreContainer container) {
     this.container = container;
   }
@@ -504,10 +502,7 @@ class SolrCores {
   }
 
   public boolean isCoreLoading(String name) {
-    if (currentlyLoadingCores.contains(name)) {
-      return true;
-    }
-    return false;
+    return currentlyLoadingCores.contains(name);
   }
 
   public void queueCoreToClose(SolrCore coreToClose) {

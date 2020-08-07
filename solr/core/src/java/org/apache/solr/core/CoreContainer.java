@@ -30,6 +30,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +43,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -78,6 +81,7 @@ import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Replica.State;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.params.MapSolrParams;
 import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.IOUtils;
 import org.apache.solr.common.util.ObjectCache;
@@ -255,6 +259,91 @@ public class CoreContainer {
   private volatile long status = 0L;
 
   private ExecutorService coreContainerAsyncTaskExecutor = ExecutorUtil.newMDCAwareCachedThreadPool("Core Container Async Task");
+
+  private final Object lock = new Object();
+  private Set<String> pausedUpdatesCores = Collections.synchronizedSet(new HashSet<>());
+  private Map<String, AtomicInteger> currentCoreUpdateCounters = new HashMap<>();
+
+  public boolean startTrackUpdateRequest(String coreName) {
+    synchronized (lock) {
+      if (pausedUpdatesCores.contains(coreName)) {
+        return false;
+      }
+      if (!currentCoreUpdateCounters.containsKey(coreName)) {
+        currentCoreUpdateCounters.put(coreName, new AtomicInteger());
+      }
+      currentCoreUpdateCounters.get(coreName).incrementAndGet();
+      return true;
+    }
+  }
+
+  public void endTrackUpdateRequest(String coreName) {
+    synchronized (lock) {
+      currentCoreUpdateCounters.get(coreName).decrementAndGet();
+    }
+  }
+
+  public void pauseUpdateFor(String coreName) {
+    synchronized (lock) {
+      pausedUpdatesCores.add(coreName);
+    }
+  }
+
+  public void unpauseUpdateFor(String coreName) {
+    synchronized (lock) {
+      pausedUpdatesCores.remove(coreName);
+    }
+  }
+
+  public void waitForEmptyUpdates(String coreName) {
+    AtomicInteger counter = currentCoreUpdateCounters.get(coreName);
+    if (counter == null)
+      return;
+
+    while (counter.get() != 0) {
+      log.info("Datcm waiting for finish pending updates:{}", counter.get());
+      try {
+        Thread.sleep(300);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
+
+  }
+
+  public void abdicateLeadership(String coreName) {
+    CoreDescriptor cd = getCoreDescriptor(coreName);
+    if (!isZooKeeperAware() || cd.getCloudDescriptor() == null || !cd.getCloudDescriptor().isLeader())
+      return;
+
+    try {
+      synchronized (lock) {
+        pausedUpdatesCores.add(coreName);
+      }
+      AtomicInteger counter = currentCoreUpdateCounters.get(coreName);
+      while (counter != null && counter.get() != 0) {
+        try {
+          Thread.sleep(300);
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+      }
+      try {
+        zkSys.zkController.rejoinShardLeaderElection(cd, false);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        log.error("Exception on abdicate leadership of core:{}", coreName, e);
+      } catch (Exception e) {
+        log.error("Exception on abdicate leadership of core:{}", coreName, e);
+      }
+    } finally {
+      synchronized (lock) {
+        pausedUpdatesCores.remove(coreName);
+      }
+    }
+  }
 
   private enum CoreInitFailedAction {fromleader, none}
 

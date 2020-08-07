@@ -22,12 +22,20 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.solr.cloud.CloudDescriptor;
+import org.apache.solr.cloud.Overseer;
 import org.apache.solr.cloud.ZkController;
+import org.apache.solr.cloud.overseer.OverseerAction;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
+import org.apache.solr.common.cloud.ClusterState;
+import org.apache.solr.common.cloud.DocCollection;
+import org.apache.solr.common.cloud.Slice;
+import org.apache.solr.common.cloud.ZkNodeProps;
+import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.params.CoreAdminParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
@@ -228,6 +236,40 @@ enum CoreAdminOperation implements CoreAdminOp {
       } else {
         log().info("electionNode is required param");
       }
+    }
+  }),
+  ABDICATE_LEADERSHIP_OP(ABDICATE_LEADERSHIP, it -> {
+    CoreContainer cc = it.handler.coreContainer;
+    if (!cc.isZooKeeperAware()) {
+      throw new SolrException(ErrorCode.BAD_REQUEST, "This api only works in SolrCloud env");
+    }
+    for (String coreName: cc.getAllCoreNames()) {
+        try {
+          CoreDescriptor cd = cc.getCoreDescriptor(coreName);
+          if (cd == null || cd.getCloudDescriptor() == null || !cd.getCloudDescriptor().isLeader()) {
+            continue;
+          }
+
+          ClusterState clusterState = cc.getZkController().getClusterState();
+          DocCollection docCollection = clusterState.getCollection(cd.getCollectionName());
+          Slice slice = docCollection.getSlice(cd.getCloudDescriptor().getShardId());
+          if (slice.getReplicas().size() < 2) {
+            log().info("Skipping abdicate leadership of core:{} since it is the only one replicas in the shard", coreName);
+          }
+          if (slice.getReplicas(replica -> replica.isActive(clusterState.getLiveNodes())).size() < 2) {
+            log().info("Skipping abdicate leadership of core:{} since it is the only one active replica", coreName);
+          }
+
+          cc.pauseUpdateFor(coreName);
+          cc.waitForEmptyUpdates(coreName);
+          cc.getZkController().rejoinShardLeaderElection(cd, false);
+        } finally {
+          cc.unpauseUpdateFor(coreName);
+          // after this point this core can still receive more updates since it did not explicitly
+          // unset its leader role from cluster state, but that fine since it already unset its leader role locally
+          // (by setting cloudDescriptor.isLeader() flag) so it gonna keep refusing updates or routing update requests
+          // to a new leader
+        }
     }
   }),
 
