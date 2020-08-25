@@ -378,7 +378,7 @@ public  class LeaderElector {
    * Sort n string sequence list.
    */
   public static void sortSeqs(List<String> seqs) {
-    seqs.sort((o1, o2) -> {
+    Collections.sort(seqs, (o1, o2) -> {
       int i = getSeq(o1) - getSeq(o2);
       return i == 0 ? o1.compareTo(o2) : i;
     });

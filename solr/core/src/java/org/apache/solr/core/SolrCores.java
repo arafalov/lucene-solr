@@ -41,15 +41,15 @@ import java.util.concurrent.TimeUnit;
 
 class SolrCores {
 
-  private static final Object modifyLock = new Object(); // for locking around manipulating any of the core maps.
+  private static Object modifyLock = new Object(); // for locking around manipulating any of the core maps.
   private final Map<String, SolrCore> cores = new LinkedHashMap<>(); // For "permanent" cores
 
   // These descriptors, once loaded, will _not_ be unloaded, i.e. they are not "transient".
   private final Map<String, CoreDescriptor> residentDesciptors = new LinkedHashMap<>();
 
   private final CoreContainer container;
-  
-  private final Set<String> currentlyLoadingCores = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
+  private Set<String> currentlyLoadingCores = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -63,10 +63,12 @@ class SolrCores {
 
   private TransientSolrCoreCacheFactory transientCoreCache;
 
+  private TransientSolrCoreCache transientSolrCoreCache = null;
+
   SolrCores(CoreContainer container) {
     this.container = container;
   }
-  
+
   protected void addCoreDescriptor(CoreDescriptor p) {
     synchronized (modifyLock) {
       if (p.isTransient()) {
@@ -102,7 +104,7 @@ class SolrCores {
     waitForLoadingCoresToFinish(30*1000);
     Collection<SolrCore> coreList = new ArrayList<>();
 
-    
+
     TransientSolrCoreCache transientSolrCoreCache = getTransientCacheHandler();
     // Release observer
     if (transientSolrCoreCache != null) {
@@ -125,7 +127,7 @@ class SolrCores {
         coreList.addAll(pendingCloses);
         pendingCloses.clear();
       }
-      
+
       ExecutorService coreCloseExecutor = ExecutorUtil.newMDCAwareFixedThreadPool(Integer.MAX_VALUE,
           new SolrNamedThreadFactory("coreCloseExecutor"));
       try {
@@ -151,7 +153,7 @@ class SolrCores {
 
     } while (coreList.size() > 0);
   }
-  
+
   // Returns the old core if there was a core of the same name.
   //WARNING! This should be the _only_ place you put anything into the list of transient cores!
   protected SolrCore putCore(CoreDescriptor cd, SolrCore core) {
@@ -172,11 +174,11 @@ class SolrCores {
   /**
    *
    * @return A list of "permanent" cores, i.e. cores that  may not be swapped out and are currently loaded.
-   * 
+   *
    * A core may be non-transient but still lazily loaded. If it is "permanent" and lazy-load _and_
    * not yet loaded it will _not_ be returned by this call.
-   * 
-   * Note: This is one of the places where SolrCloud is incompatible with Transient Cores. This call is used in 
+   *
+   * Note: This is one of the places where SolrCloud is incompatible with Transient Cores. This call is used in
    * cancelRecoveries, transient cores don't participate.
    */
 
@@ -192,10 +194,10 @@ class SolrCores {
    * Gets the cores that are currently loaded, i.e. cores that have
    * 1> loadOnStartup=true and are either not-transient or, if transient, have been loaded and have not been aged out
    * 2> loadOnStartup=false and have been loaded but either non-transient or have not been aged out.
-   * 
+   *
    * Put another way, this will not return any names of cores that are lazily loaded but have not been called for yet
    * or are transient and either not loaded or have been swapped out.
-   * 
+   *
    * @return List of currently loaded cores.
    */
   Set<String> getLoadedCoreNames() {
@@ -210,7 +212,7 @@ class SolrCores {
     return set;
   }
   /**
-   * Gets a list of all cores, loaded and unloaded 
+   * Gets a list of all cores, loaded and unloaded
    *
    * @return all cores names, whether loaded or unloaded, transient or permanent.
    */
@@ -250,16 +252,16 @@ class SolrCores {
           throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "No such core: " + n1);
         }
       }
-      // When we swap the cores, we also need to swap the associated core descriptors. Note, this changes the 
+      // When we swap the cores, we also need to swap the associated core descriptors. Note, this changes the
       // name of the coreDescriptor by virtue of the c-tor
-      CoreDescriptor cd1 = c1.getCoreDescriptor(); 
+      CoreDescriptor cd1 = c1.getCoreDescriptor();
       addCoreDescriptor(new CoreDescriptor(n1, c0.getCoreDescriptor()));
       addCoreDescriptor(new CoreDescriptor(n0, cd1));
       cores.put(n0, c1);
       cores.put(n1, c0);
       c0.setName(n1);
       c1.setName(n0);
-      
+
       container.getMetricManager().swapRegistries(
           c0.getCoreMetricManager().getRegistryName(),
           c1.getCoreMetricManager().getRegistryName());
@@ -481,7 +483,7 @@ class SolrCores {
       }
     }
   }
-  
+
   // returns when core is finished loading, throws exception if no such core loading or loaded
   public void waitForLoadingCoreToFinish(String core, long timeoutMs) {
     long time = System.nanoTime();
@@ -502,7 +504,10 @@ class SolrCores {
   }
 
   public boolean isCoreLoading(String name) {
-    return currentlyLoadingCores.contains(name);
+    if (currentlyLoadingCores.contains(name)) {
+      return true;
+    }
+    return false;
   }
 
   public void queueCoreToClose(SolrCore coreToClose) {
