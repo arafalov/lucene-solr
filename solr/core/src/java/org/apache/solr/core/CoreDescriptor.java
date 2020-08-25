@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -140,6 +141,11 @@ public class CoreDescriptor {
 
   /** The properties for this core, substitutable by resource loaders */
   protected final Properties substitutableProperties = new Properties();
+
+  /** If true then all update requests will be refused */
+  protected volatile boolean pausedAcceptingIndexing = false;
+
+  protected final AtomicInteger inflightUpdatesCounter = new AtomicInteger();
 
   /** TESTS ONLY */
   public CoreDescriptor(String name, Path instanceDir, CoreContainer coreContainer, String... coreProps) {
@@ -332,6 +338,37 @@ public class CoreDescriptor {
   public boolean isLoadOnStartup() {
     String tmp = coreProperties.getProperty(CORE_LOADONSTARTUP, "false");
     return Boolean.parseBoolean(tmp);
+  }
+
+  public void setPausedAcceptingIndexing(boolean pausedAcceptingIndexing) {
+    this.pausedAcceptingIndexing = pausedAcceptingIndexing;
+  }
+
+  public boolean isPausedAcceptingIndexing() {
+    return pausedAcceptingIndexing;
+  }
+
+  public boolean incInflightUpdateCounter() {
+    if (isPausedAcceptingIndexing()) {
+      return false;
+    }
+    inflightUpdatesCounter.incrementAndGet();
+    return true;
+  }
+
+  public void decInFlightUpdateCounter() {
+    inflightUpdatesCounter.decrementAndGet();
+  }
+
+  public void waitForNoInflightUpdates() {
+    while (inflightUpdatesCounter.get() != 0) {
+      try {
+        Thread.sleep(500);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
   }
 
   public boolean isTransient() {

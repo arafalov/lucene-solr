@@ -572,7 +572,7 @@ public class HttpSolrCall {
           remoteQuery(coreUrl + path, resp);
           return RETURN;
         case PROCESS:
-          if (handler instanceof UpdateRequestHandler && !cores.startTrackUpdateRequest(core.getName())) {
+          if (handler instanceof UpdateRequestHandler && !core.getCoreDescriptor().incInflightUpdateCounter()) {
             throw new SolrException(ErrorCode.SERVER_ERROR, "Updates are temporary paused for core:"+core.getName());
           }
           try {
@@ -611,7 +611,7 @@ public class HttpSolrCall {
             return RETURN;
           } finally {
             if (handler instanceof UpdateRequestHandler) {
-              cores.endTrackUpdateRequest(core.getName());
+              core.getCoreDescriptor().decInFlightUpdateCounter();
             }
           }
         default: return action;

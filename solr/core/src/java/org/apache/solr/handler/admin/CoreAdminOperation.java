@@ -16,26 +16,14 @@
  */
 package org.apache.solr.handler.admin;
 
-import java.io.IOException;
-import java.lang.invoke.MethodHandles;
-import java.nio.file.Path;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.solr.cloud.CloudDescriptor;
-import org.apache.solr.cloud.Overseer;
 import org.apache.solr.cloud.ZkController;
-import org.apache.solr.cloud.overseer.OverseerAction;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Slice;
-import org.apache.solr.common.cloud.ZkNodeProps;
-import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.params.CoreAdminParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
@@ -48,7 +36,7 @@ import org.apache.solr.core.SolrInfoBean;
 import org.apache.solr.core.snapshots.SolrSnapshotManager;
 import org.apache.solr.core.snapshots.SolrSnapshotMetaDataManager;
 import org.apache.solr.core.snapshots.SolrSnapshotMetaDataManager.SnapshotMetaData;
-import org.apache.solr.handler.admin.CoreAdminHandler.CoreAdminOp;
+import org.apache.solr.handler.admin.CoreAdminHandler.*;
 import org.apache.solr.metrics.SolrMetricManager;
 import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.update.UpdateLog;
@@ -58,6 +46,16 @@ import org.apache.solr.util.RefCounted;
 import org.apache.solr.util.TestInjection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.lang.invoke.MethodHandles;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.solr.common.params.CommonParams.NAME;
 import static org.apache.solr.common.params.CoreAdminParams.COLLECTION;
@@ -238,38 +236,55 @@ enum CoreAdminOperation implements CoreAdminOp {
       }
     }
   }),
+
   ABDICATE_LEADERSHIP_OP(ABDICATE_LEADERSHIP, it -> {
     CoreContainer cc = it.handler.coreContainer;
     if (!cc.isZooKeeperAware()) {
       throw new SolrException(ErrorCode.BAD_REQUEST, "This api only works in SolrCloud env");
     }
-    for (String coreName: cc.getAllCoreNames()) {
-        try {
-          CoreDescriptor cd = cc.getCoreDescriptor(coreName);
-          if (cd == null || cd.getCloudDescriptor() == null || !cd.getCloudDescriptor().isLeader()) {
-            continue;
-          }
+    String cores = it.req.getParams().get("cores");
+    Set<String> selectedCores = null;
+    if (cores != null) {
+      selectedCores = new HashSet<>(Arrays.asList(cores.split(",")));
+    }
+    for (CoreDescriptor cd: cc.getCoreDescriptors()) {
+      if (cd == null || cd.getCloudDescriptor() == null || !cd.getCloudDescriptor().isLeader()) {
+        continue;
+      }
+      if (selectedCores != null && !selectedCores.contains(cd.getName())) {
+        continue;
+      }
 
-          ClusterState clusterState = cc.getZkController().getClusterState();
-          DocCollection docCollection = clusterState.getCollection(cd.getCollectionName());
-          Slice slice = docCollection.getSlice(cd.getCloudDescriptor().getShardId());
-          if (slice.getReplicas().size() < 2) {
-            log().info("Skipping abdicate leadership of core:{} since it is the only one replicas in the shard", coreName);
-          }
-          if (slice.getReplicas(replica -> replica.isActive(clusterState.getLiveNodes())).size() < 2) {
-            log().info("Skipping abdicate leadership of core:{} since it is the only one active replica", coreName);
-          }
-
-          cc.pauseUpdateFor(coreName);
-          cc.waitForEmptyUpdates(coreName);
-          cc.getZkController().rejoinShardLeaderElection(cd, false);
-        } finally {
-          cc.unpauseUpdateFor(coreName);
-          // after this point this core can still receive more updates since it did not explicitly
-          // unset its leader role from cluster state, but that fine since it already unset its leader role locally
-          // (by setting cloudDescriptor.isLeader() flag) so it gonna keep refusing updates or routing update requests
-          // to a new leader
+      try {
+        ClusterState clusterState = cc.getZkController().getClusterState();
+        DocCollection docCollection = clusterState.getCollection(cd.getCollectionName());
+        Slice slice = docCollection.getSlice(cd.getCloudDescriptor().getShardId());
+        if (slice.getReplicas().size() < 2) {
+          log().info("Skipping abdicate leadership of core:{} since it is the only one replicas in the shard", cd.getName());
         }
+        if (slice.getReplicas(replica -> replica.isActive(clusterState.getLiveNodes())).size() < 2) {
+          log().info("Skipping abdicate leadership of core:{} since it is the only one active replica", cd.getName());
+        }
+
+        cd.setPausedAcceptingIndexing(true);
+        cd.waitForNoInflightUpdates();
+        cc.getZkController().rejoinShardLeaderElection(cd, false);
+      } finally {
+        cd.setPausedAcceptingIndexing(false);
+        // after this point this core can still receive more updates since it did not explicitly
+        // unset its leader role from cluster state, but that fine since it already unset its leader role locally
+        // (by setting cloudDescriptor.isLeader() flag) so it gonna keep refusing updates or routing update requests
+        // to a new leader
+      }
+    }
+  }),
+
+  UNPAUSE_INDEXING_OP(UNPAUSE_INDEXING, it -> {
+    CoreContainer cc = it.handler.coreContainer;
+    for (CoreDescriptor cd : cc.getCoreDescriptors()) {
+      if (cd != null) {
+        cd.setPausedAcceptingIndexing(false);
+      }
     }
   }),
 
