@@ -65,7 +65,7 @@ For more information about the "Solr Home" and Solr specific configuration
 
 For a Solr tutorial
 
- * https://wiki.apache.org/solr/SolrResources 
+ * https://cwiki.apache.org/confluence/display/solr/SolrResources
 
 For a list of other tutorials and introductory articles.
 
