@@ -91,3 +91,14 @@ For sorting, just use an untokenized field, converted to lower case, with punctu
 Finally, for faceting, use the primary author only via a `StrField`:
 
 `Schildt, Herbert`
+
+== Performance considerations for schema design
+
+While it is easy to start with Solr schema that resembles a database and stores and indexes all the fields, as you evolve it and tune it for your use cases, you may want to keep in mind the following performance hints:
+
+- set `stored="false"` for all fields possible (esp large fields) when you only need to search on the field but don't need to return the original value.
+- set `indexed="false"` if you don't need to search on the field, but only return the field as a result of searching on other indexed fields.
+- remove all unneeded `copyField` statements
+- for best index size and searching performance, set `indexed="false"` for all general text fields, use `copyField` to copy them to the catchall `"text"` field, and use that for searching.
+- For maximum indexing performance, use the <<using-solrj.adoc#types-of-solrclients,SolrJ client implementation>>, suitable to your setup
+- Remember to run the JVM in server mode, and use a higher logging level that avoids logging every request
