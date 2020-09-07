@@ -42,6 +42,26 @@ The `uniqueKey` must always be defined.
 Note that the `types` and `fields` sections are optional, meaning you are free to mix `field`, `dynamicField`, `copyField` and `fieldType` definitions on the top level. This allows for a more logical grouping of related tags in your schema.
 ====
 
+== Schema name and version
+
+`schema` element has a `name` and `version` attributes.  
+`name` attribute is for your own schema information tracking purposes.
+`version` atribute controls the syntax and semantics of backward compatibility. You would not normally change that value. 
+
+.Schema version information
+[width="60%",cols="1,6"]
+|===
+|Version | Changes
+
+|1.6 (current) |useDocValuesAsStored defaults to true.
+|1.5 |omitNorms defaults to true for primitive field types (int, float, boolean, string...)
+|1.4 |autoGeneratePhraseQueries attribute introduced to drive QueryParser behavior when a single string produces multiple tokens.  Defaults to off for version >= 1.4
+|1.3 |removed optional field compress feature
+|1.2 |omitTermFreqAndPositions attribute introduced, true by default except for text fields.
+|1.1 |multiValued attribute introduced, false by default
+|1.0 |multiValued attribute did not exist, all fields are multiValued by nature
+|===
+
 == Choosing Appropriate Numeric Types
 
 For general numeric needs, consider using one of the `IntPointField`, `LongPointField`, `FloatPointField`, or `DoublePointField` classes, depending on the specific values you expect. These "Dimensional Point" based numeric classes use specially encoded data structures to support efficient range queries regardless of the size of the ranges used. Enable <<docvalues.adoc#docvalues,DocValues>> on these fields as needed for sorting and/or faceting.
