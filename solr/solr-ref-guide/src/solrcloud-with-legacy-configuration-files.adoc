@@ -22,11 +22,12 @@ All of the required configuration is already set up in the sample configurations
 
 These properties exist in 3 files: `schema.xml`, `solrconfig.xml`, and `solr.xml`.
 
-. In `schema.xml`, you must have a `\_version_` field defined:
+. In `schema.xml`, you must have a `\_version_` field defined as well as docValues-enabled `plong` type:
 +
 [source,xml]
 ----
-<field name="_version_" type="long" indexed="true" stored="true" multiValued="false"/>
+<field name="_version_" type="plong" indexed="false" stored="false"/>
+<fieldType name="plong" class="solr.LongPointField" docValues="true"/>
 ----
 +
 . In `solrconfig.xml`, you must have an `UpdateLog` defined. This should be defined in the `updateHandler` section.
@@ -37,6 +38,7 @@ These properties exist in 3 files: `schema.xml`, `solrconfig.xml`, and `solr.xml
   ...
   <updateLog>
     <str name="dir">${solr.data.dir:}</str>
+    <int name="numVersionBuckets">${solr.ulog.numVersionBuckets:65536}</int>
   </updateLog>
   ...
 </updateHandler>
